@@ -1,10 +1,10 @@
 #include "CytronMotorDriver.h"
 
 // Create Cytron Objects (PWM_DIR, PWM, DIR)
-CytronMD motor1(PWM_DIR, 3,2);
-CytronMD motor2(PWM_DIR, 5,4);
-CytronMD motor3(PWM_DIR, 6,7);
-CytronMD motor4(PWM_DIR, 9,8);
+CytronMD motor1(PWM_DIR, 2, 3);
+CytronMD motor2(PWM_DIR, 4, 5);
+CytronMD motor3(PWM_DIR, 6, 7);
+CytronMD motor4(PWM_DIR, 8, 9);
 
 // ====== Motor Control Functions ======
 void forward(int speed) {
@@ -58,21 +58,29 @@ void stopMotors() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Robot Ready. Send commands: f,b,l,r,q,e,s");
+  Serial.println("Motor Control with Variable Speed Ready!");
 }
 
 void loop() {
   if (Serial.available()) {
-    char cmd = Serial.read();
+    String cmd = Serial.readStringUntil('\n'); // read until newline
 
-    switch (cmd) {
-      case 'f': forward(200); break;   // forward
-      case 'b': backward(200); break;  // backward
-      case 'l': left(200); break;      // left
-      case 'r': right(200); break;     // right
-      case 'q': spinLeft(200); break;  // spin left
-      case 'e': spinRight(200); break; // spin right
-      case 's': stopMotors(); break;   // stop
+    if (cmd.length() > 1) {
+      char action = cmd.charAt(0);       // f/b/l/r/e/q/s
+      int speed = cmd.substring(1).toInt(); // extract number
+
+      speed = constrain(speed, 0, 255);  // limit speed to motor driver range
+
+      switch (action) {
+        case 'f': forward(speed); break;
+        case 'b': backward(speed); break;
+        case 'l': left(speed); break;
+        case 'r': right(speed); break;
+        case 'e': spinLeft(speed); break;
+        case 'q': spinRight(speed); break;
+        case 's': stopMotors(); break;
+      }
+      Serial.print("Received: "); Serial.println(cmd);
     }
   }
 }

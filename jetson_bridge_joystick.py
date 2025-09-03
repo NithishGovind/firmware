@@ -3,11 +3,11 @@ import serial
 import time
 import threading
 
-# Serial (Arduino)
+# ====== Serial (Arduino) ======
 ser = serial.Serial("/dev/ttyACM0", 115200, timeout=1)
 time.sleep(2)  # wait for Arduino reset
 
-# Init pygame for Xbox controller
+# ====== Init pygame for Xbox controller ======
 pygame.init()
 pygame.joystick.init()
 
@@ -19,10 +19,16 @@ joystick = pygame.joystick.Joystick(0)
 joystick.init()
 print("Controller:", joystick.get_name())
 
-# Shared variable
-current_cmd = "s"
+# ====== Shared variable between threads ======
+current_cmd = "s0"
 lock = threading.Lock()
 
+# ====== Helper: map joystick axis to motor speed ======
+def scale_speed(value, max_speed=255):
+    # joystick -1.0 → 1.0 → 0–255
+    return int(abs(value) * max_speed)
+
+# ====== Thread: Joystick Reader ======
 def joystick_reader():
     global current_cmd
     deadband = 0.2
@@ -33,38 +39,40 @@ def joystick_reader():
         x_axis = joystick.get_axis(3)  # right stick X
         y_axis = joystick.get_axis(4)  # right stick Y
 
-        new_cmd = "s"
-        if abs(y_axis) > abs(x_axis):  # forward/back priority
+        new_cmd = "s0"  # default stop
+
+        if abs(y_axis) > abs(x_axis):  # forward/back takes priority
             if y_axis < -deadband:
-                new_cmd = "f"
+                new_cmd = f"f{scale_speed(y_axis)}"
             elif y_axis > deadband:
-                new_cmd = "b"
+                new_cmd = f"b{scale_speed(y_axis)}"
         else:  # left/right
             if x_axis < -deadband:
-                new_cmd = "l"
+                new_cmd = f"l{scale_speed(x_axis)}"
             elif x_axis > deadband:
-                new_cmd = "r"
+                new_cmd = f"r{scale_speed(x_axis)}"
 
-        # Update shared command
+        # Update shared variable
         with lock:
             current_cmd = new_cmd
-        
-        time.sleep(0.01)  # fast polling
 
+        time.sleep(0.01)  # polling rate
+
+# ====== Thread: Serial Writer ======
 def serial_writer():
     last_cmd = ""
     while True:
         with lock:
             cmd = current_cmd
 
-        if cmd != last_cmd:  # only send if changed
-            ser.write(cmd.encode())
+        if cmd != last_cmd:  # only send when changed
+            ser.write((cmd + "\n").encode())  # add newline
             print("Sent to Arduino:", cmd)
             last_cmd = cmd
 
         time.sleep(0.05)  # steady sending rate
 
-# Start threads
+# ====== Start threads ======
 t1 = threading.Thread(target=joystick_reader, daemon=True)
 t2 = threading.Thread(target=serial_writer, daemon=True)
 
