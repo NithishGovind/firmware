@@ -61,34 +61,16 @@ def joystick_reader():
 # ====== Thread: Serial Writer ======
 def serial_writer():
     last_cmd = ""
-    last_speed = 0
-    
     while True:
         with lock:
             cmd = current_cmd
 
-        action = cmd[0]  # 'f', 'b', 'l', 'r', 's'
-        speed = int(cmd[1:]) if len(cmd) > 1 else 0
-
-        # Normal drive commands
-        if action != "s":
-            ser.write((cmd + "\n").encode())
+        if cmd != last_cmd:  # only send when changed
+            ser.write((cmd + "\n").encode())  # add newline
             print("Sent to Arduino:", cmd)
             last_cmd = cmd
-            last_speed = speed
 
-        # If STOP requested → smooth deceleration
-        elif action == "s" and last_speed > 0:
-            for decel in range(last_speed, -1, -30):  # step down by 30
-                smooth_cmd = f"s{decel}"
-                ser.write((smooth_cmd + "\n").encode())
-                print("Sent to Arduino (decel):", smooth_cmd)
-                time.sleep(0.05)
-            last_speed = 0
-            last_cmd = "s0"
-
-        time.sleep(0.05)
-
+        time.sleep(0.05)  # steady sending rate
 
 # ====== Start threads ======
 t1 = threading.Thread(target=joystick_reader, daemon=True)
