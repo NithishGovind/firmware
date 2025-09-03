@@ -24,7 +24,7 @@ current_cmd = "s0"
 lock = threading.Lock()
 
 # ====== Helper: map joystick axis to motor speed ======
-def scale_speed(value, max_speed=255):
+def scale_speed(value, max_speed=190):
     # joystick -1.0 → 1.0 → 0–255
     return int(abs(value) * max_speed)
 
