@@ -5,9 +5,9 @@ import threading
 
 # ====== Serial (Arduino) ======
 ser = serial.Serial("/dev/ttyACM0", 115200, timeout=1)
-time.sleep(2)  # wait for Arduino reset
+time.sleep(2)
 
-# ====== Init pygame for Xbox controller ======
+# ====== Init pygame ======
 pygame.init()
 pygame.joystick.init()
 
@@ -19,58 +19,61 @@ joystick = pygame.joystick.Joystick(0)
 joystick.init()
 print("Controller:", joystick.get_name())
 
-# ====== Shared variable between threads ======
-current_cmd = "s0"
+# ====== Shared state ======
+target_left = 0
+target_right = 0
+current_left = 0
+current_right = 0
 lock = threading.Lock()
 
-# ====== Helper: map joystick axis to motor speed ======
-def scale_speed(value, max_speed=190):
-    # joystick -1.0 → 1.0 → 0–255
-    return int(abs(value) * max_speed)
+def scale_trigger(val, max_speed=190):
+    # Xbox triggers are -1 at rest, +1 pressed
+    return int(((val + 1) / 2) * max_speed)  # map -1→0, 1→max
 
 # ====== Thread: Joystick Reader ======
 def joystick_reader():
-    global current_cmd
-    deadband = 0.2
-    
+    global target_left, target_right
     while True:
-        pygame.event.pump()  # process events
+        pygame.event.pump()
 
-        x_axis = joystick.get_axis(3)  # right stick X
-        y_axis = joystick.get_axis(4)  # right stick Y
+        left_trigger = joystick.get_axis(2)   # L2
+        right_trigger = joystick.get_axis(5)  # R2
 
-        new_cmd = "s0"  # default stop
-
-        if abs(y_axis) > abs(x_axis):  # forward/back takes priority
-            if y_axis < -deadband:
-                new_cmd = f"f{scale_speed(y_axis)}"
-            elif y_axis > deadband:
-                new_cmd = f"b{scale_speed(y_axis)}"
-        else:  # left/right
-            if x_axis < -deadband:
-                new_cmd = f"l{scale_speed(x_axis)}"
-            elif x_axis > deadband:
-                new_cmd = f"r{scale_speed(x_axis)}"
-
-        # Update shared variable
         with lock:
-            current_cmd = new_cmd
+            target_left = scale_trigger(left_trigger)
+            target_right = scale_trigger(right_trigger)
 
-        time.sleep(0.01)  # polling rate
+        time.sleep(0.01)
 
-# ====== Thread: Serial Writer ======
+# ====== Thread: Serial Writer (smooth ramp) ======
 def serial_writer():
-    last_cmd = ""
+    global current_left, current_right
+    ramp_step = 10
+    update_rate = 0.05
+
     while True:
         with lock:
-            cmd = current_cmd
+            tl = target_left
+            tr = target_right
 
-        if cmd != last_cmd:  # only send when changed
-            ser.write((cmd + "\n").encode())  # add newline
-            print("Sent to Arduino:", cmd)
-            last_cmd = cmd
+        # Smooth ramp for left motor
+        if current_left < tl:
+            current_left = min(current_left + ramp_step, tl)
+        elif current_left > tl:
+            current_left = max(current_left - ramp_step, tl)
 
-        time.sleep(0.05)  # steady sending rate
+        # Smooth ramp for right motor
+        if current_right < tr:
+            current_right = min(current_right + ramp_step, tr)
+        elif current_right > tr:
+            current_right = max(current_right - ramp_step, tr)
+
+        # Send "tank style" command → e.g., "M150,180"
+        cmd = f"M{current_left},{current_right}\n"
+        ser.write(cmd.encode())
+        print("Sent:", cmd.strip())
+
+        time.sleep(update_rate)
 
 # ====== Start threads ======
 t1 = threading.Thread(target=joystick_reader, daemon=True)
@@ -79,6 +82,5 @@ t2 = threading.Thread(target=serial_writer, daemon=True)
 t1.start()
 t2.start()
 
-# Keep main alive
 while True:
     time.sleep(1)
