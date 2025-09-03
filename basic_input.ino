@@ -1,10 +1,10 @@
 #include "CytronMotorDriver.h"
 
 // Create Cytron Objects (PWM_DIR, PWM, DIR)
-CytronMD motor1(PWM_DIR, 2, 3);
-CytronMD motor2(PWM_DIR, 4, 5);
+CytronMD motor1(PWM_DIR, 3, 2);
+CytronMD motor2(PWM_DIR, 5, 4);
 CytronMD motor3(PWM_DIR, 6, 7);
-CytronMD motor4(PWM_DIR, 8, 9);
+CytronMD motor4(PWM_DIR, 9, 8);
 
 // ====== Motor Control Functions ======
 void forward(int speed) {
