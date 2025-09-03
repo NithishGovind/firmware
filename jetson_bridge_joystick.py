@@ -85,12 +85,23 @@ def serial_writer():
             last_cmd = cmd
         time.sleep(0.05)  # steady sending rate
 
+# ====== Periodic Memory Reset Thread ======
+def memory_reset_periodically():
+    global current_cmd
+    while True:
+        time.sleep(60)  # every 60 seconds
+        with lock:
+            current_cmd = "s0"  # reset to stop
+        print("Memory reset: current_cmd set to default")
+
 # ====== Start threads ======
 t1 = threading.Thread(target=joystick_reader, daemon=True)
 t2 = threading.Thread(target=serial_writer, daemon=True)
+reset_thread = threading.Thread(target=memory_reset_periodically, daemon=True)
 
 t1.start()
 t2.start()
+reset_thread.start()
 
 # Keep main alive
 while True:
