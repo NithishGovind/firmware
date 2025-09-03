@@ -5,9 +5,9 @@ import threading
 
 # ====== Serial (Arduino) ======
 ser = serial.Serial("/dev/ttyACM0", 115200, timeout=1)
-time.sleep(2)
+time.sleep(2)  # wait for Arduino reset
 
-# ====== Init pygame ======
+# ====== Init pygame for Xbox controller ======
 pygame.init()
 pygame.joystick.init()
 
@@ -19,61 +19,71 @@ joystick = pygame.joystick.Joystick(0)
 joystick.init()
 print("Controller:", joystick.get_name())
 
-# ====== Shared state ======
-target_left = 0
-target_right = 0
-current_left = 0
-current_right = 0
+# ====== Shared variable between threads ======
+current_cmd = "s0"
 lock = threading.Lock()
 
-def scale_trigger(val, max_speed=190):
-    # Xbox triggers are -1 at rest, +1 pressed
-    return int(((val + 1) / 2) * max_speed)  # map -1→0, 1→max
+# ====== Helper: map joystick axis to motor speed ======
+def scale_speed(value, max_speed=190):
+    # joystick -1.0 → 1.0 → 0–255
+    return int(abs(value) * max_speed)
 
 # ====== Thread: Joystick Reader ======
 def joystick_reader():
-    global target_left, target_right
+    global current_cmd
+    deadband = 0.2
+    spin_speed = 190  # speed for spin commands
+    
     while True:
-        pygame.event.pump()
+        pygame.event.pump()  # process events
 
-        left_trigger = joystick.get_axis(2)   # L2
-        right_trigger = joystick.get_axis(5)  # R2
+        # Buttons
+        x_btn = joystick.get_button(2)  # X button
+        lb_btn = joystick.get_button(4)
+        rb_btn = joystick.get_button(5)
 
+        # Button priority
+        if x_btn:
+            new_cmd = "s0"  # Stop
+        elif lb_btn:
+            new_cmd = f"e{spin_speed}"  # Spin Left
+        elif rb_btn:
+            new_cmd = f"q{spin_speed}"  # Spin Right
+        else:
+            # Axes
+            x_axis = joystick.get_axis(3)  # right stick X
+            y_axis = joystick.get_axis(4)  # right stick Y
+
+            new_cmd = "s0"  # default stop
+
+            if abs(y_axis) > abs(x_axis):  # forward/back takes priority
+                if y_axis < -deadband:
+                    new_cmd = f"f{scale_speed(y_axis)}"
+                elif y_axis > deadband:
+                    new_cmd = f"b{scale_speed(y_axis)}"
+            else:  # left/right
+                if x_axis < -deadband:
+                    new_cmd = f"l{scale_speed(x_axis)}"
+                elif x_axis > deadband:
+                    new_cmd = f"r{scale_speed(x_axis)}"
+
+        # Update shared variable
         with lock:
-            target_left = scale_trigger(left_trigger)
-            target_right = scale_trigger(right_trigger)
+            current_cmd = new_cmd
 
-        time.sleep(0.01)
+        time.sleep(0.01)  # polling rate
 
-# ====== Thread: Serial Writer (smooth ramp) ======
+# ====== Thread: Serial Writer ======
 def serial_writer():
-    global current_left, current_right
-    ramp_step = 10
-    update_rate = 0.05
-
+    last_cmd = ""
     while True:
         with lock:
-            tl = target_left
-            tr = target_right
-
-        # Smooth ramp for left motor
-        if current_left < tl:
-            current_left = min(current_left + ramp_step, tl)
-        elif current_left > tl:
-            current_left = max(current_left - ramp_step, tl)
-
-        # Smooth ramp for right motor
-        if current_right < tr:
-            current_right = min(current_right + ramp_step, tr)
-        elif current_right > tr:
-            current_right = max(current_right - ramp_step, tr)
-
-        # Send "tank style" command → e.g., "M150,180"
-        cmd = f"M{current_left},{current_right}\n"
-        ser.write(cmd.encode())
-        print("Sent:", cmd.strip())
-
-        time.sleep(update_rate)
+            cmd = current_cmd
+        if cmd != last_cmd:  # only send when changed
+            ser.write((cmd + "\n").encode())  # add newline
+            print("Sent to Arduino:", cmd)
+            last_cmd = cmd
+        time.sleep(0.05)  # steady sending rate
 
 # ====== Start threads ======
 t1 = threading.Thread(target=joystick_reader, daemon=True)
@@ -82,5 +92,6 @@ t2 = threading.Thread(target=serial_writer, daemon=True)
 t1.start()
 t2.start()
 
+# Keep main alive
 while True:
     time.sleep(1)
